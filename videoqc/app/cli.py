@@ -35,7 +35,9 @@ def _build_parser() -> _Parser:
     p.add_argument("--jobs", type=int, help="并发数（仅本次）")
     p.add_argument("--fast", action="store_true", help="只做快检")
     p.add_argument(
-        "--min-severity", choices=["low", "medium", "high"], help="报告只列出不低于该级别的 Issue"
+        "--min-severity",
+        choices=["low", "medium", "high"],
+        help="Markdown 报告只列出不低于该级别的 Issue（不改结论/退出码/JSON）"
     )
     p.add_argument("--timeout", type=int, help="单文件超时秒数（仅本次）")
     p.add_argument("--config", help="配置文件路径")

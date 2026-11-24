@@ -12,6 +12,9 @@ from pathlib import Path
 from videoqc.core.model import AudioStats, PacketStats, StreamInfo
 from videoqc.media.paths import ffmpeg_path, ffprobe_path, long_path, no_window_flags
 
+_AUDIO_GAP_MIN = 0.2  # 音频包间隔超过它就算断点（AAC 一帧 ~21ms，0.2s 已是十帧空档）
+_MAX_CORRUPT_PTS = 8192  # 坏包位置最多留这么多个（超过只更新 corrupt_last_ts）
+
 
 class ProbeError(Exception):
     def __init__(self, message: str, stderr_tail: str = "") -> None:
@@ -171,10 +174,21 @@ def probe_streams(path: str | Path, timeout: float) -> StreamInfo:
 class _StreamAcc:
     """单个流的时间戳累加器：流式读包时不保留 CSV 原文，只留统计所需的原始 PTS。"""
 
-    __slots__ = ("corrupt_flags", "count", "dts_non_monotonic", "dts_prev", "missing_pts", "pts")
+    __slots__ = (
+        "corrupt_flags",
+        "corrupt_last_ts",
+        "corrupt_pts",
+        "count",
+        "dts_non_monotonic",
+        "dts_prev",
+        "missing_pts",
+        "pts",
+    )
 
     def __init__(self) -> None:
         self.pts: list[float] = []
+        self.corrupt_pts: list[float] = []  # 坏包位置（首 8192 个，够定位密度峰值）
+        self.corrupt_last_ts: float | None = None
         self.missing_pts = 0
         self.dts_prev: float | None = None
         self.dts_non_monotonic = 0
@@ -183,16 +197,20 @@ class _StreamAcc:
 
     def add(self, pts_raw: str, dts_raw: str, flags: str, start_time: float) -> None:
         self.count += 1
-        # ffprobe 的 flags 是 3 字符位串 K/D/C（Key/Discard/Corrupt，见 ffprobe.c show_packet）：
-        # D = 可丢弃包（B 帧重排时正常出现），C = 包内容损坏。原实现误把 D 当坏包。
-        if "C" in flags:
-            self.corrupt_flags += 1
         dts = _float(dts_raw)
         if dts is not None:
             if self.dts_prev is not None and dts < self.dts_prev:
                 self.dts_non_monotonic += 1
             self.dts_prev = dts
         t = _float(pts_raw)
+        # ffprobe 的 flags 是 3 字符位串 K/D/C（Key/Discard/Corrupt，见 ffprobe.c show_packet）：
+        # D = 可丢弃包（B 帧重排时正常出现），C = 包内容损坏。原实现误把 D 当坏包。
+        if "C" in flags:
+            self.corrupt_flags += 1
+            if t is not None:
+                self.corrupt_last_ts = t - start_time
+                if len(self.corrupt_pts) < _MAX_CORRUPT_PTS:
+                    self.corrupt_pts.append(self.corrupt_last_ts)
         if t is None:
             self.missing_pts += 1
             return
@@ -214,6 +232,8 @@ class _StreamAcc:
         pts = self.ordered()
         if not pts:
             return None
+        # 音频断点：AAC 帧长 ~21ms，0.2s 以上的空档只可能是真断（D03 用它判剪辑断点）
+        gaps = [(a, b) for a, b in pairwise(pts) if b - a > _AUDIO_GAP_MIN]
         return AudioStats(
             first_ts=pts[0],
             last_ts=pts[-1],
@@ -221,6 +241,7 @@ class _StreamAcc:
             dup_pts=self.dup_pts(pts),
             dts_non_monotonic=self.dts_non_monotonic,
             missing_pts=self.missing_pts,
+            gaps=gaps,
         )
 
 
@@ -242,7 +263,8 @@ def probe_packets(
         "-v",
         "error",
         "-show_entries",
-        "packet=stream_index,pts_time,dts_time,duration_time,flags",
+        # 不要 duration_time：它占 CSV 约 1/5 字节且没有任何检测项用它（实测 197MB 文件 998→801ms）
+        "packet=stream_index,pts_time,dts_time,flags",
         "-of",
         "csv=p=0",
         long_path(path),
@@ -265,6 +287,8 @@ def probe_packets(
     seen: dict[int, _StreamAcc] = {}
     video_acc: _StreamAcc | None = None
     audio_acc: _StreamAcc | None = None
+    # 老调用（两个 index 都没给）才降级：首流当视频、其余当音频
+    legacy = video_index is None and audio_index is None
     err = ""
     rc = 0
     out = proc.stdout
@@ -275,7 +299,7 @@ def probe_packets(
                     proc.kill()
                     raise ProbeError(f"超时（{timeout:g}s）：读取包时间戳")
                 parts = line.rstrip("\r\n").split(",")
-                if len(parts) < 5:
+                if len(parts) < 4:
                     continue
                 idx_f = _float(parts[0])
                 if idx_f is None:
@@ -288,9 +312,11 @@ def probe_packets(
                         video_index = idx  # 未给 index：首行流号当视频流
                 if idx == video_index:
                     video_acc = acc
-                elif audio_index is None or idx == audio_index:
+                elif idx == audio_index or legacy:
+                    # 调用方给了视频流号却没给音频流号 = 这文件没有音轨：
+                    # 不能把字幕/数据流当音频，否则 D04 会拿字幕包报“音频时间戳异常”
                     audio_acc = acc
-                acc.add(parts[1], parts[2], parts[4], start_time)
+                acc.add(parts[1], parts[2], parts[3], start_time)
     finally:
         if out is not None:
             out.close()
@@ -312,6 +338,8 @@ def probe_packets(
         dts_non_monotonic=video.dts_non_monotonic,
         dup_pts=video.dup_pts(pts),
         corrupt_flags=video.corrupt_flags,
+        corrupt_pts=sorted(video.corrupt_pts),
+        corrupt_last_ts=video.corrupt_last_ts,
         first_ts=pts[0],
         last_ts=pts[-1],
         missing_pts=video.missing_pts,

@@ -73,6 +73,7 @@ class ScanController(QObject):
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None
         with self._lock:
+            self._epoch += 1  # 让在飞的旧任务作废：停止后不能再冒出一轮“扫描完成”
             self._running.clear()  # 旧任务已在跑且会被 kill；不清会让 is_running() 永远为真
 
     def is_running(self) -> bool:
@@ -94,8 +95,15 @@ class ScanController(QObject):
                 self.file_stage.emit(p, stage)
 
             prev = self.session.get(path)
-            r = analyze_file(path, self.cfg, mode, gen, cancel, on_stage=_stage,
-                             warm_streams=prev.streams if prev is not None else None)
+            r = analyze_file(
+                path,
+                self.cfg,
+                mode,
+                gen,
+                cancel,
+                on_stage=_stage,
+                warm_streams=prev.streams if prev is not None else None,
+            )
         except Exception as e:  # pipeline 内部已兜底，这里只防漏
             r = FileResult(
                 path=path,

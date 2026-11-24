@@ -11,13 +11,13 @@ from videoqc.core.detectors.corruption import check_d12
 from videoqc.core.detectors.freeze import check_d05, check_d09
 from videoqc.core.model import DecodeEvents
 from videoqc.core.pipeline import analyze_file
-from videoqc.media.runners import _State, close_open, parse_line
+from videoqc.media.stderr_parse import State, close_open, parse_line
 
 pytestmark = pytest.mark.usefixtures("require_binaries")
 
 
 def _parse(name: str, data_dir) -> DecodeEvents:
-    ev, st = DecodeEvents(), _State()
+    ev, st = DecodeEvents(), State()
     for line in (data_dir / name).read_text(encoding="utf-8", errors="replace").splitlines():
         parse_line(line, ev, st)
     return ev
@@ -46,7 +46,7 @@ def test_parse_silence_and_volume(data_dir):
 
 def test_parse_errors_splits_streams():
     """stderr 里带 stream #0:N 的报错要归到对应流：音频报错不能算成花屏。"""
-    ev, st = DecodeEvents(), _State(video_index=0, audio_index=1)
+    ev, st = DecodeEvents(), State(video_index=0, audio_index=1)
     parse_line("[aac @ x] Error while decoding stream #0:1: Invalid data found", ev, st)
     parse_line("[h264 @ x] Invalid NAL unit size", ev, st)
     assert (ev.audio_errors, ev.video_errors) == (1, 1)
@@ -68,7 +68,7 @@ def test_pairing_loss_keeps_events(data_dir, monkeypatch):
 
     from videoqc.media import runners
 
-    monkeypatch.setattr(runners, "_SHOWINFO_PTS", re.compile(r"^NOMATCH$"))
+    monkeypatch.setattr(runners, "SHOWINFO_PTS", re.compile(r"^NOMATCH$"))
     ev = runners.run_decode_pass(
         str(data_dir / "freeze3.mp4"),
         Config(),
@@ -82,7 +82,7 @@ def test_pairing_loss_keeps_events(data_dir, monkeypatch):
 
 
 def test_closed_at_eof_when_end_missing():
-    ev, st = DecodeEvents(), _State()
+    ev, st = DecodeEvents(), State()
     parse_line("[Parsed_freezedetect_0 @ x] lavfi.freezedetect.freeze_start: 2", ev, st)
     close_open(ev, st, 10.0)
     assert ev.freezes == [(2.0, 10.0)]
@@ -90,7 +90,7 @@ def test_closed_at_eof_when_end_missing():
 
 def test_freeze_duration_used_when_end_missing():
     """SPEC §4.3：只有 duration 没有 end 时，end = start + duration，不能拖到 EOF 误报长冻结。"""
-    ev, st = DecodeEvents(), _State()
+    ev, st = DecodeEvents(), State()
     parse_line("[Parsed_freezedetect_0 @ x] lavfi.freezedetect.freeze_start: 2", ev, st)
     parse_line("[Parsed_freezedetect_0 @ x] lavfi.freezedetect.freeze_duration: 1.5", ev, st)
     close_open(ev, st, 20.0)  # EOF=20，但 duration 说只冻到 3.5
@@ -99,7 +99,7 @@ def test_freeze_duration_used_when_end_missing():
 
 def test_next_start_closes_previous_with_duration():
     """上一个冻结的 end 行缺失又来了新 start：用 duration 收口，不能把两段并成一段。"""
-    ev, st = DecodeEvents(), _State()
+    ev, st = DecodeEvents(), State()
     parse_line("[Parsed_freezedetect_0 @ x] lavfi.freezedetect.freeze_start: 2", ev, st)
     parse_line("[Parsed_freezedetect_0 @ x] lavfi.freezedetect.freeze_duration: 1.5", ev, st)
     parse_line("[Parsed_freezedetect_0 @ x] lavfi.freezedetect.freeze_start: 10", ev, st)
@@ -181,6 +181,44 @@ def test_d12_needs_decode_and_scales():
     assert [i.severity for i in check_d12(_ctx(ev))] == ["medium"]
     ev = DecodeEvents(error_count=60, video_errors=60)
     assert [i.severity for i in check_d12(_ctx(ev))] == ["high"]
+
+
+def test_d12_bad_packets_are_localized_in_time():
+    """坏包要能跳转定位（v0.3.5）：首/末时间、最密集 5s 窗口都进 evidence。"""
+    from videoqc.core.model import PacketStats
+
+    ctx = _ctx(DecodeEvents())
+    ctx.packets = PacketStats(
+        pts=[i * 0.04 for i in range(1000)],
+        p50=0.04,
+        dts_non_monotonic=0,
+        dup_pts=0,
+        corrupt_flags=5,
+        first_ts=0.0,
+        last_ts=39.96,
+        corrupt_pts=[1.0, 10.0, 10.2, 10.4, 30.0],
+        corrupt_last_ts=30.0,
+    )
+    (issue,) = check_d12(ctx)
+    assert issue.start == pytest.approx(1.0) and issue.end == pytest.approx(30.0)
+    assert issue.evidence["busiest_sec"] == pytest.approx(10.0)  # 5s 窗口 10.0-10.4 最密
+    assert "00:00:01.000" in issue.title
+
+
+def test_d12_decode_error_lines_carry_estimated_time():
+    """解码报错行本身没时间戳：用最近一个 showinfo 采样点估位置（v0.3.5）。"""
+    from videoqc.media.stderr_parse import State, parse_line
+
+    ev = DecodeEvents()
+    st = State(video_index=0, audio_index=1)
+    st.last_pts = 12.0
+    parse_line("Error while decoding stream #0:0: Invalid NAL unit size", ev, st)
+    parse_line("Error while decoding stream #0:1: garbage", ev, st)
+    assert ev.video_errors == 1 and ev.audio_errors == 1
+    assert ev.video_error_times == [pytest.approx(12.0)]
+    assert ev.audio_error_times == [pytest.approx(12.0)]
+    (issue,) = [i for i in check_d12(_ctx(ev)) if i.kind == "decode_errors"]
+    assert issue.start == pytest.approx(12.0)
 
 
 def test_d12_audio_errors_are_not_reported_as_corruption():

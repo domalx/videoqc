@@ -102,11 +102,11 @@ def _run(n=3, cast_pixels=(200, 60, 60), step=5.0):
 
 
 def test_d10_reports_window_of_casts():
-    issues = check_d10(_ctx(_run(3)))
+    issues = check_d10(_ctx(_run(4), dur=60.0))  # 4 点 × 5s ≈ 16s > color_window_sec=15s
     assert [i.kind for i in issues] == ["color_cast"]
     assert issues[0].severity == "medium"
     assert "偏红" in issues[0].title
-    assert check_d10(_ctx(_run(2))) == []  # 不足窗口长度
+    assert check_d10(_ctx(_run(3), dur=60.0)) == []  # 只 11s，不足窗口时长
 
 
 def test_d10_whole_clip_is_high():
@@ -120,7 +120,7 @@ def test_d11_missing_samples_is_reported():
     ctx.decode = DecodeEvents(completed=True)
     assert [i.kind for i in check_d11(ctx)] == ["no_samples"]
 
-    short = _ctx([], dur=2.0)  # 短于两个采样间隔，抽不到样本是正常的
+    short = _ctx([], dur=1.5)  # 短于两个采样间隔（2×1s），抽不到样本是正常的
     short.decode = DecodeEvents(completed=True)
     assert check_d11(short) == []
 
@@ -132,10 +132,16 @@ def test_d11_partial_sampling_is_reported():
 
 
 def test_d11_exposure_buckets():
-    dark = _ctx([Sample(t=0, r=5, g=5, b=5, y=5, sat=0, cast=0)])
+    # 过暗/过曝要连续 2 秒以上才算（v0.3.6：1s 网格下单个暗点多半是转场/夜景）
+    dark = _ctx([Sample(t=t, r=5, g=5, b=5, y=5, sat=0, cast=0) for t in (0.0, 1.0)])
     assert [i.kind for i in check_d11(dark)] == ["underexposed", "low_sample_count"]
 
-    bright = _ctx([Sample(t=0, r=250, g=250, b=250, y=250, sat=0, cast=0)] * 3)
+    single = _ctx([Sample(t=0, r=5, g=5, b=5, y=5, sat=0, cast=0)])
+    assert [i.kind for i in check_d11(single)] == ["low_sample_count"]  # 孤立一帧不报
+
+    bright = _ctx(
+        [Sample(t=float(t), r=250, g=250, b=250, y=250, sat=0, cast=0) for t in (0, 1, 2)]
+    )
     assert [i.kind for i in check_d11(bright)] == ["overexposed"]
 
     flat = _ctx([Sample(t=i * 5.0, r=128, g=128, b=128, y=128, sat=0, cast=0) for i in range(3)])
@@ -157,9 +163,9 @@ def test_cast_fixture_end_to_end(data_dir):
 def test_sampling_grid_not_shrunk_by_keyframe_interval(data_dir):
     """抽帧时间戳必须与画面真实对齐，且不能因 GOP > 采样间隔而丢点。
 
-    base.mp4 的 GOP≈8.33s > color_sample_sec=5s。用 -skip_frame nokey 时，
-    fps 会把 0/8.33/16.66 的关键帧贴成 0/5/10 的名义时间，丢掉 t=15 且画面错位。
-    去掉 skip_frame 后应在 0/5/10/15 四个网格点各采一帧（见 OPTIMIZATION #1）。
+    base.mp4 的 GOP≈8.33s。用 -skip_frame nokey 时，fps 会把关键帧贴到名义时间上，
+    丢掉中间网格点且画面错位。去掉 skip_frame 后 20s 素材按 1s 网格应采到 20 帧
+    （见 OPTIMIZATION #1、CHANGELOG v0.3.6）。
     """
     from videoqc.media.runners import run_decode_pass
 
@@ -169,8 +175,8 @@ def test_sampling_grid_not_shrunk_by_keyframe_interval(data_dir):
     samples = run_decode_pass(
         p, Config(), has_audio=True, origin_sec=0.0, duration_sec=20.0
     ).samples
-    assert samples is not None and len(samples) == 4
-    assert [s.t for s in samples] == pytest.approx([0.0, 5.0, 10.0, 15.0], abs=0.2)
+    assert samples is not None and len(samples) == 20
+    assert [s.t for s in samples] == pytest.approx([float(i) for i in range(20)], abs=0.2)
 
 
 @pytest.mark.usefixtures("require_binaries")
@@ -200,9 +206,9 @@ def test_nonzero_start_time_stays_stream_relative(tmp_path, data_dir):
         check=True,
     )
     s = run_decode_pass(out, Config(), has_audio=True, origin_sec=10.0, duration_sec=20.0).samples
-    assert s is not None and len(s) == 4
-    # 必须是从流起点算的 0/5/10/15，而不是重复扣减后的 -10/-5/0/5
-    assert [x.t for x in s] == pytest.approx([0.0, 5.0, 10.0, 15.0], abs=0.2)
+    assert s is not None and len(s) == 20
+    # 必须是从流起点算的 0/1/2/…/19，而不是重复扣减后的 -10/-9/…/+9
+    assert [x.t for x in s] == pytest.approx([float(i) for i in range(20)], abs=0.2)
 
 
 @pytest.mark.usefixtures("require_binaries")
@@ -227,12 +233,16 @@ def test_base_fixture_has_no_color_issue(data_dir):
 
 
 def test_d11_splits_disjoint_runs():
-    dark = Sample(t=0, r=5, g=5, b=5, y=5, sat=0, cast=0)
-    normal = Sample(t=5, r=120, g=100, b=90, y=104, sat=0.25, cast=8)
-    samples = [dark, normal, Sample(t=10, r=5, g=5, b=5, y=5, sat=0, cast=0), normal]
+    def dark(t):
+        return Sample(t=t, r=5, g=5, b=5, y=5, sat=0, cast=0)
+
+    def normal(t):
+        return Sample(t=t, r=120, g=100, b=90, y=104, sat=0.25, cast=8)
+
+    samples = [dark(0.0), dark(1.0), normal(5.0), dark(10.0), dark(11.0), normal(15.0)]
     runs = [i for i in check_d11(_ctx(samples)) if i.kind == "underexposed"]
-    assert len(runs) == 2  # 两个相隔 10s 的暗点各自成条
-    assert (runs[0].start, runs[0].end) == (0.0, 0.0)
+    assert len(runs) == 2  # 两个相隔 10s 的暗段各自成条
+    assert (runs[0].start, runs[0].end) == (0.0, 1.0)
 
 
 def test_solid_screen_owns_pure_color():

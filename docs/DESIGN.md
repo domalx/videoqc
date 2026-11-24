@@ -1,10 +1,10 @@
 # domaMedia · 录像质量检测工具（videoqc）设计文档
 
-版本：v0.3.2（检测口径修正） · 目标平台：Windows 10/11 x64 · 交付形态：免安装压缩包（自带运行时与 ffmpeg）
+版本：v0.3.3（缺陷修复 + 问题面板标题精简） · 目标平台：Windows 10/11 x64 · 交付形态：免安装压缩包（自带运行时与 ffmpeg）
 
 > 实现规格：`docs/SPEC.md`（接口、命令、正则、判定伪代码、测试夹具、验收清单）。本文与 SPEC 冲突时以 SPEC 为准并回改本文。
 >
-> 变更：v0.1 命令行检测工具 → v0.2 加桌面 GUI 与打包交付 → v0.3 按已确认约束收敛范围（H.264/MP4、<20 文件/目录、报告自用、不做缓存、阈值只改 config）→ v0.3.1 评审修订（时间基准含滤镜、结论单一来源、Session 接受规则、黑场/静音降级边界、配置补键、验收标准可执行化）→ v0.3.2 检测口径修正（D14 基准改为视频流时长、冻结与静音重叠降级、曝光/纯色按段报并新增纯色屏、新增时长过短/空音轨/采样率与声道检查）。修订理由见 §18 ADR D17–D20。
+> 变更：v0.1 命令行检测工具 → v0.2 加桌面 GUI 与打包交付 → v0.3 按已确认约束收敛范围（H.264/MP4、<20 文件/目录、报告自用、不做缓存、阈值只改 config）→ v0.3.1 评审修订（时间基准含滤镜、结论单一来源、Session 接受规则、黑场/静音降级边界、配置补键、验收标准可执行化）→ v0.3.2 检测口径修正（D14 基准改为视频流时长、冻结与静音重叠降级、曝光/纯色按段报并新增纯色屏、新增时长过短/空音轨/采样率与声道检查） → v0.3.3 缺陷修复（D05 零长区间除零、解码配对失步不再中断、抽不到样本/采样中断显式上报、mypy 覆盖全包、问题面板标题只留文件名）。修订理由见 §18 ADR D17–D20。
 
 ---
 
@@ -14,10 +14,10 @@
 |----|------|
 | 里程碑 | M1–M6 全部完成：探测/包统计 → D01–D14 → 报告（MD+JSON）→ CLI → GUI → PyInstaller 打包 |
 | 代码 | `videoqc/` 35 个文件、3910 行，无占位代码；`ruff check` 零发现，`mypy`（全包 `videoqc/`，`check_untyped_defs`）零发现 |
-| 测试 | `pytest -q` 122 项全绿；含 `tests/test_ui.py` 的 GUI 冒烟（offscreen：加载/时长预填/扫描/列宽稳定/导出/重扫先清色/30 行滚动）与 `tests/test_cli.py` 的退出码契约；素材 = 真实录像 2 个 + 生成夹具 10 个 + `bulk_*` 24 个（列表滚动用） |
+| 测试 | `pytest -q` 123 项全绿；含 `tests/test_ui.py` 的 GUI 冒烟（offscreen：加载/时长预填/扫描/列宽稳定/导出/重扫先清色/30 行滚动）与 `tests/test_cli.py` 的退出码契约；素材 = 真实录像 2 个 + 生成夹具 10 个 + `bulk_*` 24 个（列表滚动用） |
 | 性能基准 | 全量扫描（ffmpeg 解码 + 抽帧 + 14 项检测）：705.6s 素材 29.9s，735.0s 素材 14.8s ≈ **24–50 倍速**；快检（只读包头）约 0.3s/文件 |
-| 交付 | `dist/videoqc-0.3.2-win64.zip` 132MB（解包 348MB）+ `.sha256`；另有 `dist/videoqc/videoqc.exe` 可直接运行（免解压）；`bin/` 为 ffmpeg/ffprobe 9.1 essentials（GPLv3） |
-| 已知缺口 | ① 真实 VFR 素材上的 D03 跳变尚未肉眼核实（阈值已加 MAD 自适应，仍有残留误报的可能）；② 逐帧步进为关键帧级（误差 0–2s，已定不修）；③ 无 CI；④ 画面采样对 ffmpeg stderr 文案仍强耦合，升级 ffmpeg 前须跑 `tests/data/*.log` 金样 |
+| 交付 | `dist/videoqc-0.3.3-win64.zip` 132MB（解包 348MB）+ `.sha256`；另有 `dist/videoqc/videoqc.exe` 可直接运行（免解压）；`bin/` 为 ffmpeg/ffprobe 9.1 essentials（GPLv3） |
+| 已知缺口 | ① 真实 VFR 素材上的 D03 跳变尚未肉眼核实（阈值已加 MAD 自适应，仍有残留误报的可能）；② 逐帧步进为关键帧级（误差 0–2s，已定不修）；③ CI 只在 windows-latest 跑（`.github/workflows/ci.yml`：下 ffmpeg → 生成夹具 → ruff/mypy/pytest），夹具与 `bin/` 都不入库；④ 画面采样对 ffmpeg stderr 文案仍强耦合，升级 ffmpeg 前须跑 `tests/data/*.log` 金样 |
 
 > 本节只记录「此刻真实存在的东西」；代码或交付物变了就改日期与数字，不写流水账。
 
@@ -357,7 +357,7 @@ D13 的 HDR 标记是 D10/D11 的前置条件：HDR（`smpte2084`/`arib-std-b67`
 │ core/          pipeline(单文件编排) · detectors/* · model               │
 │                (纯 Python，无 Qt 依赖 → 可被 CLI 与测试复用)            │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ media/         probe.py(ffprobe) · runners.py(ffmpeg+stderr 解析)       │
+│ media/         probe.py(ffprobe) · runners.py(ffmpeg 进程) · stderr_parse.py(文案→事件) │
 │                color.py(rawvideo 统计) · report.py(md/json) · paths     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -381,6 +381,7 @@ D13 的 HDR 标记是 D10/D11 的前置条件：HDR（`smpte2084`/`arib-std-b67`
 | `core/model.py` | `Issue`/`FileResult`/`Report`、`fmt_tc` | — |
 | `media/probe.py` | 流与包信息、版本 | `probe_streams`, `probe_packets` |
 | `media/runners.py` | ffmpeg 执行、**双通道**（stdout 像素 / stderr 日志）读取、超时、部分结果；事件与采样同一趟产出 | `run_decode_pass` |
+| `media/stderr_parse.py` | ffmpeg stderr 文案 → 事件（freeze/black/silence/音量/报错）与流内定位 | `parse_line`, `close_open`, `State` |
 | `media/color.py` | 帧统计纯计算（RGB 均值/偏色/曝光）与样本聚合 | `frame_stats`, `aggregate` |
 | `media/report.py` | MD/JSON 渲染（GUI 导出与 CLI 共用） | `render_markdown`, `dump_json` |
 
@@ -648,8 +649,8 @@ ffmpeg -nostdin -v info -i FILE -an \
   "av_offset_sec": 0.5,
   "truncation_gap_sec": 2.0,
   "color_cast_threshold": 25,
-  "color_sample_sec": 5.0,
-  "color_window_samples": 3,
+  "color_sample_sec": 1.0,
+  "color_window_sec": 15.0,
   "hdr_tonemap": true,
   "report_dir": "reports"
 }

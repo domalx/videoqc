@@ -3,6 +3,7 @@
 以前没有任何 GUI 测试，列宽抖动、右侧越界、滚动条挤动都是靠人工发现的；这里用 offscreen
 平台把可断言的部分固定下来：行数、结论、列宽稳定性、导出内容。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -29,11 +30,31 @@ def clips(tmp_path_factory) -> Path:
     d = Path(tmp_path_factory.mktemp("ui"))
     for name in ("a.mp4", "b.mp4"):
         subprocess.run(
-            [str(ffmpeg_path()), "-hide_banner", "-loglevel", "error", "-y",
-             "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=3",
-             "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
-             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
-             str(d / name)], check=True)
+            [
+                str(ffmpeg_path()),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=160x90:rate=10:duration=3",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(d / name),
+            ],
+            check=True,
+        )
     return d
 
 
@@ -59,12 +80,12 @@ def _scan_and_wait(app, win, mode: str) -> None:
 
 @pytest.fixture
 def win(app, clips):
-    assert QApplication.instance() is app                     # 窗口必须先有 QApplication
+    assert QApplication.instance() is app  # 窗口必须先有 QApplication
     cfg, warns = load_config(ROOT / "config.json")
     assert warns == []
-    cfg = replace(cfg, quick_check_on_select=False)   # 关掉「选中即快检」，测试自己决定何时扫
+    cfg = replace(cfg, quick_check_on_select=False)  # 关掉「选中即快检」，测试自己决定何时扫
     w = MainWindow(cfg)
-    w.ask_before_quit = False              # 别让退出确认框挂住 pytest
+    w.ask_before_quit = False  # 别让退出确认框挂住 pytest
     w.resize(1400, 800)
     w.show()
     w._load_dir(str(clips))
@@ -78,7 +99,7 @@ def test_loads_all_files_and_prefills_durations(app, win):
     assert win.model.rowCount() == 2
     ok = _pump(app, lambda: all(win.model.data(win.model.index(r, 2)) != "—" for r in range(2)))
     assert ok, "选目录后时长应在后台填好"
-    assert win.table.verticalScrollBar().isHidden() or True    # 只是不许崩
+    assert win.table.verticalScrollBar().isHidden() or True  # 只是不许崩
     assert win.status_left.text() == "已加载 2 个文件"
 
 
@@ -93,10 +114,27 @@ def test_scan_fills_result_and_issues_panel(app, win):
     assert win.issues.header.text().startswith("a.mp4 · "), "标题应带文件名与状态"
 
 
+def test_issue_header_shows_name_only():
+    """标题行只放文件名：问题数归「问题数」列，不在标题重复。"""
+    from videoqc.core.model import FileResult, Issue
+    from videoqc.ui.issue_panel import _header_text
+
+    bad = FileResult(
+        path="C:/v/坏片.mp4",
+        mode="full",
+        status="done",
+        issues=[Issue("flat_frame", "high", "纯色屏 2.0s")],
+    )
+    assert _header_text(bad) == "坏片.mp4"
+    clean = FileResult(path="C:/v/好片.mp4", mode="full", status="done")
+    assert _header_text(clean) == "好片.mp4 · 未发现异常"
+
+
 def test_column_widths_stay_fixed_during_scan(app, win):
     seen = set()
-    win.controller.file_done.connect(lambda _r: seen.add(
-        tuple(win.table.columnWidth(i) for i in range(4))))
+    win.controller.file_done.connect(
+        lambda _r: seen.add(tuple(win.table.columnWidth(i) for i in range(4)))
+    )
     _scan_and_wait(app, win, "full")
     assert len(seen) == 1, f"列宽在扫描过程中变了：{seen}"
 
@@ -129,11 +167,30 @@ def many_clips(tmp_path) -> Path:
     """30 条 1s 小片：只为把列表撑出滚动条（真实录像不进测试）。"""
     for i in range(30):
         subprocess.run(
-            [str(ffmpeg_path()), "-hide_banner", "-loglevel", "error", "-y",
-             "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=10:duration=1",
-             "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
-             str(tmp_path / f"m{i:02d}.mp4")], check=True)
+            [
+                str(ffmpeg_path()),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=160x90:rate=10:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                str(tmp_path / f"m{i:02d}.mp4"),
+            ],
+            check=True,
+        )
     return Path(tmp_path)
 
 
@@ -157,7 +214,7 @@ def test_list_scrolls_past_viewport(app, many_clips):
         assert [table.columnWidth(i) for i in range(w.model.columnCount())] == before
         assert all(w.model.result_at(r) is not None for r in range(30))
 
-        table.setCurrentIndex(w.model.index(29, 0))          # 选最后一行要自动滚到可见
+        table.setCurrentIndex(w.model.index(29, 0))  # 选最后一行要自动滚到可见
         assert table.verticalScrollBar().value() > 0
     finally:
         w.close()
@@ -168,10 +225,16 @@ def test_info_text_lists_basic_facts():
     from videoqc.core.model import StreamInfo
     from videoqc.ui.main_window import _info_text
 
-    s = StreamInfo(path="a.mp4", duration=140.4, container="mov", size_bytes=12_600_000,
-                   bit_rate=1_200_000,
-                   video={"codec": "h264", "width": 1920, "height": 1080, "fps": 29.97},
-                   audio={"codec": "aac", "sample_rate": 44100, "channels": 2}, has_audio=True)
+    s = StreamInfo(
+        path="a.mp4",
+        duration=140.4,
+        container="mov",
+        size_bytes=12_600_000,
+        bit_rate=1_200_000,
+        video={"codec": "h264", "width": 1920, "height": 1080, "fps": 29.97},
+        audio={"codec": "aac", "sample_rate": 44100, "channels": 2},
+        has_audio=True,
+    )
     assert _info_text(s) == (
         "h264 1920×1080 · 29.97fps · 02:20 · 12.0 MB · 1.2 Mbps · aac 44100Hz 2ch"
     )
@@ -181,10 +244,10 @@ def test_info_text_lists_basic_facts():
 
 def test_player_info_line_visibility(app, win):
     assert QApplication.instance() is app
-    assert not win.player.info_label.isVisibleTo(win)      # 没打开文件就不占地方
+    assert not win.player.info_label.isVisibleTo(win)  # 没打开文件就不占地方
     win.player.set_info("h264 320×180")
     assert win.player.info_label.isVisibleTo(win)
-    win.player.set_info("")                                 # 换文件/出错时清掉旧值
+    win.player.set_info("")  # 换文件/出错时清掉旧值
     assert not win.player.info_label.isVisibleTo(win)
 
 
@@ -194,11 +257,25 @@ def test_info_prefers_analyzed_streams(app, win):
     from videoqc.core.model import FileResult, Issue, StreamInfo
 
     path = win.model.path_at(0)
-    s = StreamInfo(path=path, duration=3.0, container="mov", size_bytes=1234, bit_rate=800_000,
-                   video={"codec": "h264", "width": 160, "height": 90, "fps": 10.0},
-                   audio=None, has_audio=False)
-    win.session.put(FileResult(path=path, mode="fast", status="done", streams=s,
-                               issues=[Issue("freeze", "medium", "画面冻结 3.0s")]))
+    s = StreamInfo(
+        path=path,
+        duration=3.0,
+        container="mov",
+        size_bytes=1234,
+        bit_rate=800_000,
+        video={"codec": "h264", "width": 160, "height": 90, "fps": 10.0},
+        audio=None,
+        has_audio=False,
+    )
+    win.session.put(
+        FileResult(
+            path=path,
+            mode="fast",
+            status="done",
+            streams=s,
+            issues=[Issue("freeze", "medium", "画面冻结 3.0s")],
+        )
+    )
     win._show_info(path)
     text = win.player.info_label.text()
     assert "160×90" in text and "00:03" in text and "1.2 KB" in text and "无音轨" in text
@@ -210,3 +287,22 @@ def test_info_line_arrives_from_background_probe(app, win):
     win._show_info(path)
     assert _pump(app, lambda: win.player.info_label.text() != ""), "信息行应由后台探测填上"
     assert "160×90" in win.player.info_label.text()
+
+
+def test_late_result_after_stop_is_ignored(app):
+    """点停止后旧任务还会收尾，但不能冒出第二轮“扫描完成”（v0.3.4）。"""
+    from videoqc.app.config import Config
+    from videoqc.app.controller import ScanController
+    from videoqc.app.session import Session
+    from videoqc.core.model import FileResult
+
+    assert QApplication.instance() is app
+    c = ScanController(Config(), Session())
+    emitted: list = []
+    c.scan_finished.connect(lambda *a: emitted.append(a))
+    c._total, c._running = 2, {"a.mp4": "fast"}  # 模拟一轮正在跑
+    epoch = c._epoch
+    c.stop()
+    late = FileResult(path="a.mp4", mode="fast", status="cancelled", generation=0)
+    c._finish(late, "fast", epoch)
+    assert emitted == []

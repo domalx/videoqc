@@ -37,17 +37,32 @@ def check_d03(ctx: FileContext) -> list[Issue]:
 
     out: list[Issue] = []
     dur = ctx.duration
+    tail = pts[-1]
+    # 音频断点：剪辑/重封装会把两轨在同一处一起剪掉，而录制丢帧只丢视频
+    audio_gaps = packets.audio.gaps if packets.audio else []
+    tol = ctx.cfg.av_offset_sec
     for seg in _merge_gaps(gaps):
         start, end, deltas_in_seg = seg
+        if end >= tail - 1e-6:
+            # 断点到文件末尾 ⇒ 这是尾部被截掉，不归 D03（D05 截断、D14 音视频时长差已经在报）
+            continue
         max_delta = max(deltas_in_seg)
         missing = sum(max(0, round(d / p50) - 1) for d in deltas_in_seg)
-        sev = "high" if (max_delta >= 1.0 or missing * p50 > 0.005 * dur) else "medium"
+        paired = any(a <= end + tol and b >= start - tol for a, b in audio_gaps)
+        if paired:
+            # 两轨同时断开 ⇒ 剪辑切点，不是录制缺陷：降到 medium，不当“缺帧”报
+            sev = "medium"
+            title = f"音视频同处断开（{max_delta:.3f}s），疑似剪辑/重封装"
+        else:
+            sev = "high" if (max_delta >= 1.0 or missing * p50 > 0.005 * dur) else "medium"
+            title = f"PTS 跳变，缺约 {max(1, missing)} 帧（{max_delta:.3f}s）"
         out.append(
             Issue(
                 "pts_gap",
                 sev,
-                f"PTS 跳变，缺约 {max(1, missing)} 帧（{max_delta:.3f}s）",
-                detail=f"delta={max_delta:.3f}s, p50={p50:.3f}s, thr={thr:.3f}s",
+                title,
+                detail=f"delta={max_delta:.3f}s, p50={p50:.3f}s, thr={thr:.3f}s"
+                + ("，音频在同一时间也断开" if paired else ""),
                 start=start,
                 end=end,
                 evidence={
@@ -55,6 +70,7 @@ def check_d03(ctx: FileContext) -> list[Issue]:
                     "p50": round(p50, 4),
                     "thr": round(thr, 4),
                     "missing_frames": missing,
+                    "av_paired": paired,
                 },
             )
         )

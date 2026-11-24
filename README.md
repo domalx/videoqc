@@ -11,7 +11,7 @@
 ### 用打包版
 
 1. **不想解压**：直接双击 `dist/videoqc/videoqc.exe`（同一份构建产物，未压缩目录形态）
-2. 或者解压 `videoqc-0.3.2-win64.zip` 到任意目录（路径可以有中文和空格）
+2. 或者解压 `videoqc-0.3.5-win64.zip` 到任意目录（路径可以有中文和空格）
 3. 双击 `videoqc.exe` → 「选择目录…」→ 选视频目录 → 「快速扫描」/「深度扫描」
 4. 点问题行，右侧播放器跳到该时间点；「导出报告」生成 `.md` + 同名 `.json`
 
@@ -66,24 +66,53 @@ videoqc.exe --headless --version
 
 完整键表与取值范围见 [`docs/SPEC.md`](docs/SPEC.md) §3。
 
-## 从源码运行 / 打包
+## 开发环境配置
+
+只需做一次（Windows x64 + Python 3.13；PyInstaller 不支持交叉编译，Linux/macOS 上出不了包）：
+
+1. **虚拟环境 + 开发依赖**（版本全部钉在 `requirements-dev.txt` 里）：
+
+    ```bat
+    python -m venv .venv
+    .venv\Scripts\python -m pip install -r requirements-dev.txt
+    ```
+
+2. **放 ffmpeg**：把 `ffmpeg.exe`、`ffprobe.exe` 放进仓库根的 `bin/`。来源是 [gyan.dev essentials 静态包](https://www.gyan.dev/ffmpeg/builds/)，解压后取 `bin\` 下的这两个文件即可。这两个文件共 211MB，超出 GitHub 单文件 100MB 上限，所以不入库。
+
+   网络差时用这两条路，别死等：从另一台已经配好的机器或本机已装的 ffmpeg（`where ffmpeg` 找路径）把这两个文件拷进 `bin/`；或者先挂代理再 `curl -LO https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip`。注意 `bin/` 永远不在仓库里（`.gitignore` 忽略），刚 clone 下来一定是空的，没有「从仓库里拿」这个选项。版本不必固定，9.x essentials 都能过测试（测试用的 `tests/data/*.log` 是入库的金样，不随 ffmpeg 版本变）。
+
+3. **生成测试夹具**（需要 ffmpeg，约 30 秒）：
 
 ```bat
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements-dev.txt
-.venv\Scripts\python -m pytest -q                  :: 测试（需要 bin/ 与 tests/data/）
+.venv\Scripts\python tests\make_fixtures.py
+```
+
+4. **确认环境**：
+
+```bat
+.venv\Scripts\python -m pytest -q      :: 期望 130 passed
+```
+
+`tests/data/*.mp4`、`*.png` 是生成物、不入库；`tests/data/*.log` 是 ffmpeg stderr 金样，必须入库。没有 `bin/` 或 `tests/data/` 时测试会直接失败（`conftest.require_binaries`），不是跳过。
+
+日常命令：
+
+```bat
+.venv\Scripts\python -m ruff check . && .venv\Scripts\python -m mypy videoqc   :: 门禁
+.venv\Scripts\python -m pytest -q
 .venv\Scripts\python -m videoqc                    :: 启动 GUI
 .venv\Scripts\python -m videoqc --headless <目录>  :: 命令行
 .venv\Scripts\python packaging\build_portable.py   :: 出 zip（PyInstaller + 自检 + sha256）
 ```
 
-`bin/ffmpeg.exe`、`bin/ffprobe.exe` 不入库，需自行放入（[gyan.dev essentials 静态包](https://www.gyan.dev/ffmpeg/builds/)）。
+打包前记得三处版本号一致（`videoqc/version.py`、`pyproject.toml`、`packaging/version_info.txt`），zip 名字取自版本号。
 
 ## 目录
 
 ```
 videoqc/         程序包（ui → app → core → media 四层）
-docs/            DESIGN.md（为什么这么做）、SPEC.md（具体怎么做）
+docs/            DESIGN.md（为什么这么做）、SPEC.md（具体怎么做）、CHANGELOG.md（各版本改了什么）
+AGENTS.md        给 agent/新同学的硬规则（门禁命令、版本与改动记录约定、别做的事）
 packaging/       打包脚本、spec、许可证
 tests/           单元测试与夹具生成脚本
 bin/             ffmpeg/ffprobe（不入库）
@@ -100,4 +129,6 @@ README.md        本文
 
 ## 许可
 
-程序本身按内部工具发布。随包分发第三方组件：FFmpeg（GPLv3，静态链接）、Qt/PySide6（LGPLv3，动态链接）、Python（PSF）。许可证全文见包内 `licenses/`。
+videoqc 以 **GPL-3.0-only** 发布，全文见 [`LICENSE`](LICENSE)。分发修改版或二进制时请同步提供对应源码。
+
+随包分发的第三方组件：FFmpeg（GPLv3，静态构建、独立进程调用）、Qt/PySide6（LGPLv3，动态链接）、Python（PSF）。许可证全文见包内 `licenses/`，归属与版本见 `licenses/THIRD-PARTY.md`。

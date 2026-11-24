@@ -1,8 +1,8 @@
-# videoqc 实现规格（SPEC v0.3.2）
+# videoqc 实现规格（SPEC v0.3.3）
 
-配套文档：`docs/DESIGN.md`（v0.3.2）。本文件是**可直接照着写代码**的规格：接口签名、命令原文、解析正则、判定伪代码、UI 信号、报告模板、测试夹具、验收清单。
+配套文档：`docs/DESIGN.md`（v0.3.3）。本文件是**可直接照着写代码**的规格：接口签名、命令原文、解析正则、判定伪代码、UI 信号、报告模板、测试夹具、验收清单。
 凡与 `docs/DESIGN.md` 冲突，以本文件为准并回改 DESIGN。
-实现现状（截至 2026-11-24：M1–M6 完成、81 项测试绿、`dist/videoqc-0.3.2-win64.zip`）见 `docs/DESIGN.md` §0。
+实现现状（截至 2026-11-24：M1–M6 完成、123 项测试绿、`dist/videoqc-0.3.3-win64.zip`）见 `docs/DESIGN.md` §0。
 
 ---
 
@@ -70,7 +70,7 @@
 ```
 videoqc/
 ├─ __main__.py           # 入口: 无参 → GUI; --headless → cli
-├─ version.py            # __version__ = "0.3.2"（唯一版本来源）
+├─ version.py            # __version__ = "0.3.3"（唯一版本来源）
 ├─ core/
 │  ├─ model.py           # Issue/FileResult/Report/StreamInfo/PacketStats/DecodeEvents/Sample + fmt_tc
 │  ├─ constants.py       # 内部判定常量（不开放给用户，报告不列出）
@@ -87,7 +87,8 @@ videoqc/
 │     └─ corruption.py   # D12
 ├─ media/
 │  ├─ probe.py           # probe_streams(), probe_packets(), ffmpeg_version()
-│  ├─ runners.py         # run_decode_pass()（单趟：事件 + 32×18 采样）, _read_two_pipes()
+│  ├─ runners.py         # run_decode_pass()（单趟：事件 + 32×18 采样），进程/双线程/配对/收尾
+│  ├─ stderr_parse.py    # ffmpeg stderr 文案解析：freeze/black/silence/音量/报错（唯一耦合点）
 │  ├─ color.py           # frame_stats()、样本聚合（纯计算）
 │  ├─ report.py          # render_markdown(), dump_json(), report_paths()
 │  └─ paths.py           # ROOT, BIN_DIR, ffmpeg_path(), ffprobe_path(), long_path(), is_video(), iter_videos()
@@ -284,7 +285,7 @@ class Config:
     silent_mean_db: float; clipping_db: float
     require_audio: bool
     av_offset_sec: float; truncation_gap_sec: float
-    color_cast_threshold: float; color_sample_sec: float; color_window_samples: int
+    color_cast_threshold: float; color_sample_sec: float; color_window_sec: float
     hdr_tonemap: bool; report_dir: str
     # 派生
     @property
@@ -311,8 +312,8 @@ class Config:
 | av_offset_sec | float | 0.5 | 0.05..5 | clamp |
 | truncation_gap_sec | float | 2.0 | 0.5..30 | clamp |
 | color_cast_threshold | float | 25 | 5..80 | clamp |
-| color_sample_sec | float | 5.0 | 1..60 | clamp |
-| color_window_samples | int | 3 | 2..20 | clamp |
+| color_sample_sec | float | 1.0 | 0.5..60 | clamp |
+| color_window_sec | float | 15.0 | 2..300 | clamp |
 | hdr_tonemap | bool | true | — | 非 bool → 默认 |
 | report_dir | str | "reports" | — | 空 → 默认 |
 
@@ -362,6 +363,9 @@ ffprobe -v error -select_streams v:0 \
 - `missing_pts` 计入 `stats.packets_missing_pts`；`missing_pts / total > 1%` 时由 D04 报 info（时间戳缺失，D03 会漏报）。
 
 ### 4.3 `media/runners.py :: run_decode_pass(path, cfg, *, has_audio, origin_sec, duration_sec, cancel_event) -> DecodeEvents`
+
+> 内部拆成 `_filter_chain` / `_build_cmd` / `_start`（拉进程+两个读线程）/ `_collect_samples`（帧与 pts 配对）/ `_finish`（kill 与 join）。
+> stderr 的文案正则与事件状态机在 `media/stderr_parse.py`，这是全项目唯一与 ffmpeg 输出文案耦合的地方。
 
 ```bash
 # 有音轨（默认）
@@ -616,9 +620,10 @@ for (s,e) in decode.silences:
 if not samples: return []                       # fast 模式 或 HDR 回退
 # 按连续窗口找偏色段；三通道同号（整体亮/暗）不算偏色，纯色屏由 D11 报，这里排除
 runs = group_runs(samples, lambda x: is_color_cast(x, cfg) and not is_solid(x))
-for run in runs where len(run) >= cfg.color_window_samples:
-    dur_run = run[-1].t - run[0].t + cfg.color_sample_sec
-    ratio = dur_run / dur
+# 判据按秒（v0.3.4）：采样间隔可调，沿用“连续 N 个采样点”会让窗口随时间网格漂移
+for run in runs where span(run) >= cfg.color_window_sec:
+    span = run[-1].t - run[0].t + cfg.color_sample_sec
+    ratio = span / dur
     sev = high if (ratio >= 0.8 or median_cast > 60) else medium
     Issue("color_cast", sev, f"疑似偏{direction}（cast={median_cast:.0f}/255）",
           start=max(0.0, run[0].t), end=min(dur, run[-1].t + cfg.color_sample_sec),
@@ -627,14 +632,16 @@ for run in runs where len(run) >= cfg.color_window_samples:
 for pred, kind, sev, text in [
     (x -> x.y < 16 and 不与 black 重叠, "underexposed", low, "画面过暗"),
     (x -> x.y > 235,                  "overexposed", low, "画面过曝"),
-    (x -> x.sat < 0.03 and 32<=x.y<=224, "flat_frame", low, "疑似纯色/白屏"),  # 至少 2 点
+    (x -> x.sat < 0.03 and 32<=x.y<=224, "flat_frame", low, "疑似纯色/白屏"),
     (is_solid,                        "solid_screen", high, "疑似纯色屏（绿屏/蓝屏等）"),
 ]:
     for run in group_runs(samples, pred):
-        if kind == "flat_frame" and len(run) < 2: continue
-        if kind == "solid_screen" and len(run) < 2: sev = medium   # 单点可能只是纯色场景
-        Issue(kind, sev, f"{text}（{len(run)} 个采样点）", start=run[0].t, end=run[-1].t,
-              evidence={"samples": len(run)})
+        span = run[-1].t - run[0].t + cfg.color_sample_sec
+        if kind == "solid_screen":
+            if span < 5.0: sev = medium          # 短于 5s 可能只是纯色场景/转场
+        elif span < 2.0: continue               # 过暗/过曝/纯色至少 2s：1s 网格下单帧不算
+        Issue(kind, sev, f"{text}（{span:.0f}s）", start=run[0].t, end=run[-1].t,
+              evidence={"samples": len(run), "span_sec": round(span, 1)})
 # is_solid：sat >= 0.6 且 cast >= 60/255 且 24 < y < 235 —— 正常画面极少同时满足
 # 采样覆盖不足提示
 if len(samples) < 3: Issue("low_sample_count", info, f"仅采到 {len(samples)} 个样本，色彩结论仅供参考")
@@ -960,13 +967,13 @@ python packaging/build_portable.py
 1. subprocess.run([sys.executable, "-m", "PyInstaller",
       "--noconfirm", "--clean", "--workpath", "dist/_work",
       "--distpath", "dist", "packaging/videoqc.spec"])
-2. out = dist/videoqc/  ; 复制 config.json、README.md、packaging/licenses/（含 gpl-3.0.txt、PYTHON-3.13.txt、lgpl-3.0.txt）
+2. out = dist/videoqc/  ; 复制 config.json、README.md、LICENSE、packaging/licenses/（含 gpl-3.0.txt、PYTHON-3.13.txt、lgpl-3.0.txt）
 3. 复制 bin/ffmpeg.exe, bin/ffprobe.exe（源：`<repo>/bin/`，必须事先存在，否则构建失败）
 4. 校验清单（缺一即非零退出）：
    videoqc.exe, config.json, bin/ffmpeg.exe, bin/ffprobe.exe,
    _internal/PySide6/plugins/multimedia/ffmpegmediaplugin.dll,
    _internal/PySide6/Qt6Core.dll, _internal/vcruntime140.dll, _internal/python313.dll,
-   README.md, licenses/THIRD-PARTY.md   # vcruntime 必须自包，否则违背 R9「不装 VC 运行库」
+   README.md, LICENSE, licenses/THIRD-PARTY.md   # vcruntime 必须自包，否则违背 R9「不装 VC 运行库」
 5. 冒烟：`videoqc.exe --headless --version` 与 `--headless tests/data/base.mp4 -o <临时目录>/smoke.md`，断言退出码与 md 存在（无夹具时跳过并告警；报告写临时目录，不在 `dist/` 留垃圾）
 6. zip: dist/videoqc-{__version__}-win64.zip（zipfile.ZIP_DEFLATED, compresslevel=9），保留目录前缀
 7. 输出 sha256：写 `dist/videoqc-{__version__}-win64.zip.sha256` 并打印到控制台（分发时随包给出）

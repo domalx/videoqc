@@ -1,13 +1,26 @@
 """配置：DEFAULTS、Config、load_config()、config_hash()。"""
+
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 DEFAULT_EXTENSIONS = (
-    "mp4", "mov", "mkv", "avi", "flv", "ts", "m2ts", "mpg", "webm", "m4v", "wmv", "3gp",
+    "mp4",
+    "mov",
+    "mkv",
+    "avi",
+    "flv",
+    "ts",
+    "m2ts",
+    "mpg",
+    "webm",
+    "m4v",
+    "wmv",
+    "3gp",
 )
 
 # 唯一默认值来源：config.json 由这里生成，代码里不再写第二份
@@ -31,8 +44,8 @@ DEFAULTS: dict = {
     "av_offset_sec": 0.5,
     "truncation_gap_sec": 2.0,
     "color_cast_threshold": 25.0,
-    "color_sample_sec": 5.0,
-    "color_window_samples": 3,
+    "color_sample_sec": 1.0,
+    "color_window_sec": 15.0,
     "hdr_tonemap": True,
     "report_dir": "reports",
 }
@@ -54,10 +67,10 @@ RANGES: dict[str, tuple[float, float]] = {
     "av_offset_sec": (0.05, 5),
     "truncation_gap_sec": (0.5, 30),
     "color_cast_threshold": (5, 80),
-    "color_sample_sec": (1, 60),
-    "color_window_samples": (2, 20),
+    "color_sample_sec": (0.5, 60),
+    "color_window_sec": (2, 300),
 }
-INT_KEYS = {"jobs", "timeout_sec", "color_window_samples"}
+INT_KEYS = {"jobs", "timeout_sec"}
 BOOL_KEYS = {"quick_check_on_select", "hdr_tonemap", "require_audio"}
 
 
@@ -81,17 +94,21 @@ class Config:
     av_offset_sec: float = 0.5
     truncation_gap_sec: float = 2.0
     color_cast_threshold: float = 25.0
-    color_sample_sec: float = 5.0
-    color_window_samples: int = 3
+    color_sample_sec: float = 1.0
+    # 偏色要持续这么久才算一段：15s 的强偏色可能只是布景/霓虹（_CAST_MIN_SPAN 同类口径）
+    color_window_sec: float = 15.0
     hdr_tonemap: bool = True
     report_dir: str = "reports"
 
 
-def _coerce(key: str, raw, warnings: list[str]):
+def _coerce(key: str, raw: Any, warnings: list[str]) -> Any:
     default = DEFAULTS[key]
     ok_type = (
-        (isinstance(raw, bool) if key in BOOL_KEYS
-         else isinstance(raw, (int, float)) and not isinstance(raw, bool))
+        (
+            isinstance(raw, bool)
+            if key in BOOL_KEYS
+            else isinstance(raw, (int, float)) and not isinstance(raw, bool)
+        )
         if key not in ("extensions", "report_dir")
         else (isinstance(raw, list) if key == "extensions" else isinstance(raw, str))
     )
@@ -99,6 +116,8 @@ def _coerce(key: str, raw, warnings: list[str]):
         warnings.append(f"{key} 无效({raw!r})，已用默认 {default}")
         return default
     if key == "extensions":
+        if not isinstance(raw, list):
+            return default
         items = [str(e).lower().lstrip(".") for e in raw if str(e).strip()]
         if not items:
             warnings.append(f"{key} 为空，已用默认")
@@ -129,7 +148,9 @@ def load_config(path: str | Path | None) -> tuple[Config, list[str]]:
     try:
         raw = json.loads(p.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as e:
-        return Config(), [f"config.json 语法错误（第 {e.lineno} 行第 {e.colno} 列）：{e.msg}，使用默认配置"]
+        return Config(), [
+            f"config.json 语法错误（第 {e.lineno} 行第 {e.colno} 列）：{e.msg}，使用默认配置"
+        ]
     except OSError as e:
         return Config(), [f"{p} 读取失败：{e}，使用默认配置"]
     if not isinstance(raw, dict):
@@ -142,13 +163,13 @@ def load_config(path: str | Path | None) -> tuple[Config, list[str]]:
         if key not in DEFAULTS:
             warnings.append(f"未知配置项 {key}（已忽略）")
 
-    values = {k: _coerce(k, raw.get(k, DEFAULTS[k]), warnings) for k in DEFAULTS if k != "config_version"}
+    values = {
+        k: _coerce(k, raw.get(k, DEFAULTS[k]), warnings) for k in DEFAULTS if k != "config_version"
+    }
     return Config(**values), warnings
 
 
 def config_hash(cfg: Config) -> str:
     """canonical = key 排序 + 紧凑分隔符；报告与界面共用同一哈希。"""
-    canon = json.dumps(
-        asdict(cfg), sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    canon = json.dumps(asdict(cfg), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()

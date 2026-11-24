@@ -1,4 +1,5 @@
 """D05 画面冻结、D09 黑场（含「主要现象是黑场」的互相降级）。"""
+
 from __future__ import annotations
 
 from videoqc.core.constants import FREEZE_BLACK_OVERLAP, FREEZE_HIGH_SEC
@@ -30,9 +31,20 @@ def check_d05(ctx: FileContext) -> list[Issue]:
             sev, why = "high", ""
         else:
             sev, why = "medium", ""
-        out.append(Issue("freeze", sev, f"画面冻结 {d:.1f}s{why}", start=start, end=end,
-                         evidence={"duration": round(d, 2), "black_overlap": round(black, 2),
-                                   "silence_overlap": round(quiet, 2)}))
+        out.append(
+            Issue(
+                "freeze",
+                sev,
+                f"画面冻结 {d:.1f}s{why}",
+                start=start,
+                end=end,
+                evidence={
+                    "duration": round(d, 2),
+                    "black_overlap": round(black, 2),
+                    "silence_overlap": round(quiet, 2),
+                },
+            )
+        )
     return out
 
 
@@ -46,7 +58,7 @@ def check_d09(ctx: FileContext) -> list[Issue]:
         d = end - start
         head_tail = (start <= 0.5 or end >= dur - 0.5) and d < 0.3 * dur
         if d >= 0.8 * dur:
-            sev = "medium"                          # 几乎全片黑场：不能当片头片尾忽略
+            sev = "medium"  # 几乎全片黑场：不能当片头片尾忽略
         elif head_tail:
             sev = "info"
         elif d > 5:
@@ -55,8 +67,16 @@ def check_d09(ctx: FileContext) -> list[Issue]:
             sev = "medium"
         else:
             sev = "info"
-        out.append(Issue("black", sev, f"黑场 {d:.1f}s", start=start, end=end,
-                         evidence={"duration": round(d, 2)}))
+        out.append(
+            Issue(
+                "black",
+                sev,
+                f"黑场 {d:.1f}s",
+                start=start,
+                end=end,
+                evidence={"duration": round(d, 2)},
+            )
+        )
     return out
 
 

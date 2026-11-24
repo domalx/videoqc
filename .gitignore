@@ -2,9 +2,10 @@
 .venv/
 bin/
 dist/
+build/
 logs/
-download/
 videoqc.ini
+.workbuddy/
 
 # Python
 __pycache__/

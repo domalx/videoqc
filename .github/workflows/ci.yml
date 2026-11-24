@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # 项目只出 Windows 便携包，且夹具脚本固定用 bin/ffmpeg.exe，不做跨平台矩阵
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 装 ffmpeg 到 bin/
+        shell: pwsh
+        run: |
+          $base = "https://www.gyan.dev/ffmpeg/builds"
+          curl -sSL -o ff.zip "$base/ffmpeg-release-essentials.zip"
+          Expand-Archive ff.zip -DestinationPath ff
+          New-Item -ItemType Directory -Force bin | Out-Null
+          foreach ($exe in 'ffmpeg','ffprobe') {
+            $f = "$exe.exe"
+            $p = Get-ChildItem ff -Recurse -Filter $f | Select-Object -First 1
+            if (-not $p) { throw "找不到 $f" }
+            Copy-Item $p.FullName "bin/$exe.exe"
+          }
+          bin/ffmpeg.exe -version
+
+      - name: 依赖
+        run: pip install -r requirements-dev.txt
+
+      - name: 合成夹具（tests/data 不入库）
+        run: python tests/make_fixtures.py
+
+      - name: lint
+        run: python -m ruff check .
+
+      - name: 类型检查
+        run: python -m mypy videoqc
+
+      - name: 测试
+        run: python -m pytest -q

@@ -20,7 +20,6 @@
     ".ruff_cache": true,
     ".workbuddy": true,
     "bin": true,
-    "dist": true,
     "download": true,
     "logs": true,
     "reports": true

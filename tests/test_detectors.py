@@ -1,4 +1,5 @@
 """D02/D03/D04/D14 检测器：合成 Context 单测 + gap.mp4 真实夹具集成。"""
+
 import threading
 
 import pytest
@@ -7,7 +8,7 @@ from videoqc.app.config import Config
 from videoqc.core.context import FileContext
 from videoqc.core.detectors.integrity import check_d02, check_d14
 from videoqc.core.detectors.timing import check_d03, check_d04
-from videoqc.core.model import PacketStats, StreamInfo
+from videoqc.core.model import AudioStats, PacketStats, StreamInfo
 from videoqc.core.pipeline import analyze_file
 
 
@@ -15,20 +16,30 @@ def _ctx(**kw) -> FileContext:
     return FileContext(path=kw.pop("path", "x.mp4"), cfg=Config(), **kw)
 
 
-def _streams(dv=10.0, da=10.0, vstart=0.0, astart=0.0) -> StreamInfo:
+def _streams(dv=10.0, da: float | None = 10.0, vstart=0.0, astart=0.0) -> StreamInfo:
     return StreamInfo(
-        path="x.mp4", duration=dv if not da else max(dv, da), container="mov,mp4",
-        size_bytes=1, bit_rate=None,
+        path="x.mp4",
+        duration=dv if not da else max(dv, da),
+        container="mov,mp4",
+        size_bytes=1,
+        bit_rate=None,
         video={"duration": dv, "start_time": vstart},
-        audio={"duration": da, "start_time": astart}, has_audio=True,
+        audio={"duration": da, "start_time": astart},
+        has_audio=True,
     )
 
 
 def _packets(pts, p50=1 / 30, **kw) -> PacketStats:
-    return PacketStats(pts=pts, p50=p50, dts_non_monotonic=kw.get("dtsnm", 0),
-                       dup_pts=kw.get("dup", 0), corrupt_flags=0,
-                       first_ts=pts[0], last_ts=pts[-1],
-                       nominal_fps=kw.get("fps"))
+    return PacketStats(
+        pts=pts,
+        p50=p50,
+        dts_non_monotonic=kw.get("dtsnm", 0),
+        dup_pts=kw.get("dup", 0),
+        corrupt_flags=0,
+        first_ts=pts[0],
+        last_ts=pts[-1],
+        nominal_fps=kw.get("fps"),
+    )
 
 
 # ---- D02 ----
@@ -50,7 +61,7 @@ def test_d02_clean_and_no_audio():
 
 # ---- D03 ----
 def test_d03_detects_gap_and_severity():
-    pts = [i / 30 for i in range(30)] + [i / 30 for i in range(40, 60)]   # 缺 10 帧
+    pts = [i / 30 for i in range(30)] + [i / 30 for i in range(40, 60)]  # 缺 10 帧
     # 时长 120s：缺口占全片 < 0.5% ⇒ medium（10s 片子上 0.33s 缺口就够 high 了）
     issues = check_d03(_ctx(packets=_packets(pts), streams=_streams(dv=120, da=120)))
     assert len(issues) == 1
@@ -69,12 +80,36 @@ def test_d03_short_holes_are_ignored_and_zero_p50_skips():
 
 
 def test_d03_merges_nearby_gaps():
-    pts = ([i / 30 for i in range(10)] + [i / 30 for i in range(21, 23)]
-           + [i / 30 for i in range(42, 44)])
+    pts = (
+        [i / 30 for i in range(10)]
+        + [i / 30 for i in range(21, 23)]
+        + [i / 30 for i in range(42, 44)]
+    )
     issues = check_d03(_ctx(packets=_packets(pts), streams=_streams(dv=120, da=120)))
     assert len(issues) == 1
     assert issues[0].start == pytest.approx(9 / 30) and issues[0].end == pytest.approx(42 / 30)
     assert issues[0].evidence["missing_frames"] > 20
+
+
+def test_d03_paired_av_gap_is_edit_not_defect():
+    """音视频在同一处一起断开 ⇒ 剪辑/重封装切点，降 medium（v0.3.4）。"""
+    pts = [i / 30 for i in range(30)] + [i / 30 + 10 for i in range(30)]
+    p = _packets(pts)
+    p.audio = AudioStats(first_ts=0.0, last_ts=pts[-1], packets=600, gaps=[(0.95, 9.98)])
+    issues = check_d03(_ctx(packets=p, streams=_streams(dv=120, da=120)))
+    assert len(issues) == 1 and issues[0].severity == "medium"
+    assert issues[0].evidence["av_paired"] is True
+    assert "剪辑" in issues[0].title
+
+
+def test_d03_video_only_gap_stays_high():
+    """音频连续（无断点）⇒ 真录制丢帧，仍判 high（v0.3.4 降级规则的边界）。"""
+    pts = [i / 30 for i in range(30)] + [i / 30 + 10 for i in range(30)]
+    p = _packets(pts)
+    p.audio = AudioStats(first_ts=0.0, last_ts=pts[-1], packets=600)
+    issues = check_d03(_ctx(packets=p, streams=_streams(dv=120, da=120)))
+    assert len(issues) == 1 and issues[0].severity == "high"
+    assert issues[0].evidence["av_paired"] is False
 
 
 # ---- D04 ----
@@ -129,10 +164,10 @@ def test_gap_fixture_end_to_end(data_dir):
 def test_d04_single_jump_not_mistaken_for_vfr():
     """CFR 视频中间一处跳秒不该把 pstdev 拉高后误判成 VFR（MAD 对离群点免疫）。"""
     pts = [i / 30 for i in range(300)]
-    pts[150:] = [p + 1.0 for p in pts[150:]]         # 150 帧后整体跳 1s，帧间隔仍恒定
+    pts[150:] = [p + 1.0 for p in pts[150:]]  # 150 帧后整体跳 1s，帧间隔仍恒定
     kinds = {i.kind for i in check_d04(_ctx(packets=_packets(pts, fps=30.0)))}
     assert "vfr_suspected" not in kinds
-    assert "fps_mismatch" not in kinds                # 没被误判 VFR，帧率结论仍可用
+    assert "fps_mismatch" not in kinds  # 没被误判 VFR，帧率结论仍可用
 
 
 def test_d04_fps_mismatch_suppressed_for_vfr():

@@ -1,6 +1,8 @@
 [project]
 name = "videoqc"
-version = "0.3.2"
+version = "0.3.5"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 description = "本地摄像素材扫描质检工具"
 requires-python = ">=3.13"
 

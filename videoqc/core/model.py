@@ -45,6 +45,8 @@ class AudioStats:
     dup_pts: int = 0
     dts_non_monotonic: int = 0
     missing_pts: int = 0
+    # 音频包间隔 >0.2s 的断点 [(跳变前, 跳变后)]：D03 用它判断视频跳变是不是剪辑断点
+    gaps: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def span(self) -> float:
@@ -63,6 +65,9 @@ class PacketStats:
     missing_pts: int = 0
     nominal_fps: float | None = None
     audio: AudioStats | None = None  # 没有音轨时为 None（一次 ffprobe 全流读包）
+    # 坏包位置（D12 定位用）：前 8192 个 + 最后一个，避免全片坏包的文件把内存拉满
+    corrupt_pts: list[float] = field(default_factory=list)
+    corrupt_last_ts: float | None = None
 
 
 @dataclass
@@ -73,6 +78,9 @@ class DecodeEvents:
     mean_volume: float | None = None
     max_volume: float | None = None
     errors: list[str] = field(default_factory=list)
+    # 错误行的位置估计（按最近一个 showinfo 采样点，误差 ≤ color_sample_sec）：D12 定位用
+    video_error_times: list[float] = field(default_factory=list)
+    audio_error_times: list[float] = field(default_factory=list)
     error_count: int = 0  # 音视频合计（D12 标题用）
     video_errors: int = 0  # 按 stderr 里的 stream #0:N 归到视频流
     audio_errors: int = 0
