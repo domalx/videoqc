@@ -10,6 +10,10 @@ jobs:
   test:
     # 项目只出 Windows 便携包，且夹具脚本固定用 bin/ffmpeg.exe，不做跨平台矩阵
     runs-on: windows-latest
+    env:
+      # runner 默认 cp1252，脚本里 print 中文会 UnicodeEncodeError
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 
