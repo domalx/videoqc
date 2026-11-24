@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "测试",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pytest -q",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "打包 green zip",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe packaging/build_portable.py",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "ffmpeg 版本",
+      "type": "shell",
+      "command": ".\\bin\\ffmpeg.exe -version | Select-Object -First 1",
+      "problemMatcher": []
+    }
+  ]
+}

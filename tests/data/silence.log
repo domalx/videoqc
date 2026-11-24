@@ -1,0 +1,37 @@
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'muted.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf63.16.100
+  Duration: 00:00:20.00, start: 0.000000, bitrate: 246 kb/s
+  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 320x180 [SAR 1:1 DAR 16:9], 235 kb/s, 30 fps, 30 tbr, 15360 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+      encoder         : Lavc63.24.100 libx264
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 1 kb/s (default)
+    Metadata:
+      handler_name    : SoundHandler
+[Parsed_volumedetect_1 @ 0000019c2dd05440] n_samples: 0
+Stream mapping:
+  Stream #0:0 -> #0:0 (h264 (native) -> wrapped_avframe (native))
+  Stream #0:1 -> #0:1 (aac (native) -> pcm_s16le (native))
+Output #0, null, to 'pipe:':
+  Metadata:
+    encoder         : Lavf63.16.100
+  Stream #0:0(und): Video: wrapped_avframe, yuv420p(progressive), 320x180 [SAR 1:1 DAR 16:9], q=2-31, 200 kb/s, 30 fps, 30 tbn (default)
+    Metadata:
+      encoder         : Lavc63.24.100 wrapped_avframe
+      handler_name    : VideoHandler
+  Stream #0:1(und): Audio: pcm_s16le, 44100 Hz, mono, s16, 705 kb/s (default)
+    Metadata:
+      encoder         : Lavc63.24.100 pcm_s16le
+      handler_name    : SoundHandler
+[Parsed_silencedetect_0 @ 0000019c2dcac180] silence_start: 0
+[Parsed_silencedetect_0 @ 0000019c2dcac180] silence_end: 20 | silence_duration: 20
+[Parsed_volumedetect_1 @ 0000019c2e148980] n_samples: 882000
+[Parsed_volumedetect_1 @ 0000019c2e148980] mean_volume: -91.0 dB
+[Parsed_volumedetect_1 @ 0000019c2e148980] max_volume: -91.0 dB
+[Parsed_volumedetect_1 @ 0000019c2e148980] histogram_91db: 882000
+[out#0/null @ 0000019c2c234780] video:248KiB audio:1723KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=  600 fps=0.0 q=-0.0 Lsize=N/A time=00:00:20.00 bitrate=N/A speed= 443x elapsed=0:00:00.04    

@@ -1,0 +1,38 @@
+[project]
+name = "videoqc"
+version = "0.3.2"
+description = "本地摄像素材扫描质检工具"
+requires-python = ">=3.13"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# N 打开是为了让 Qt 的 camelCase 覆写方法上的 `# noqa: N802` 名副其实
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RET", "ARG", "N", "C4", "RUF"]
+ignore = [
+    "RUF001", "RUF002", "RUF003",   # 注释和界面文案是中文，不查全角标点
+    "N802",                         # Qt 要求 camelCase 覆写（resizeEvent 等）
+    "E501",                         # 长行多为 ffmpeg 参数与报告模板字符串，折行反而更难读
+]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["videoqc"]
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_equality = true
+
+# PySide6 的存根把枚举放在 Qt.AlignmentFlag 之类的枚举类下，`Qt.AlignCenter` 这种短名
+# 在运行时有效（实测 Qt.AlignCenter=132），但 mypy 会误报 attr-defined/override。
+[[tool.mypy.overrides]]
+module = ["videoqc.ui.*", "tests.test_ui", "tests.test_cli"]
+disable_error_code = ["attr-defined", "override", "misc", "no-any-return"]
+
+# 同一条豁免给 pyright：PySide6 存根里的短枚举名（Qt.AlignCenter 等）运行时有效，
+# 只在类型检查器里报 reportAttributeAccessIssue。
+[tool.pyright]
+reportAttributeAccessIssue = "none"

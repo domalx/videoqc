@@ -1,0 +1,19 @@
+# 本机/构建产物，不入库
+.venv/
+bin/
+dist/
+logs/
+download/
+videoqc.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+reports/
+tests/data/*.mp4
+tests/data/*.png

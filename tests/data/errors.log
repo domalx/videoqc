@@ -1,0 +1,66 @@
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'corrupt.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf63.16.100
+  Duration: 00:00:20.00, start: 0.000000, bitrate: 326 kb/s
+  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 320x180 [SAR 1:1 DAR 16:9], 248 kb/s, 30 fps, 30 tbr, 15360 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+      encoder         : Lavc63.24.100 libx264
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 68 kb/s (default)
+    Metadata:
+      handler_name    : SoundHandler
+[Parsed_volumedetect_1 @ 000001d6ed0df0c0] n_samples: 0
+Stream mapping:
+  Stream #0:0 -> #0:0 (h264 (native) -> wrapped_avframe (native))
+  Stream #0:1 -> #0:1 (aac (native) -> pcm_s16le (native))
+Output #0, null, to 'pipe:':
+  Metadata:
+    encoder         : Lavf63.16.100
+  Stream #0:0(und): Video: wrapped_avframe, yuv420p(progressive), 320x180 [SAR 1:1 DAR 16:9], q=2-31, 200 kb/s, 30 fps, 30 tbn (default)
+    Metadata:
+      encoder         : Lavc63.24.100 wrapped_avframe
+      handler_name    : VideoHandler
+  Stream #0:1(und): Audio: pcm_s16le, 44100 Hz, mono, s16, 705 kb/s (default)
+    Metadata:
+      encoder         : Lavc63.24.100 pcm_s16le
+      handler_name    : SoundHandler
+[h264 @ 000001d6ed1be8c0] Invalid NAL unit size (0 > 661).
+[h264 @ 000001d6ed1be8c0] missing picture in access unit with size 665
+[aac @ 000001d6eef91900] channel element 0.0 is not allocated
+[h264 @ 000001d6ed1be8c0] Invalid NAL unit size (0 > 825).
+[h264 @ 000001d6ed1be8c0] missing picture in access unit with size 829
+[aist#0:1/aac @ 000001d6ed13db00] [dec:aac @ 000001d6eef0aac0] Error submitting packet to decoder: Invalid data found when processing input
+[aac @ 000001d6eef91900] channel element 0.0 is not allocated
+[aist#0:1/aac @ 000001d6ed13db00] [dec:aac @ 000001d6eef0aac0] Error submitting packet to decoder: Invalid data found when processing input
+[h264 @ 000001d6ed1be8c0] Invalid NAL unit size (0 > 1693).
+[h264 @ 000001d6ed1be8c0] missing picture in access unit with size 1697
+[aac @ 000001d6eef91900] channel element 0.0 is not allocated
+[aist#0:1/aac @ 000001d6ed13db00] [dec:aac @ 000001d6eef0aac0] Error submitting packet to decoder: Invalid data found when processing input
+[h264 @ 000001d6eeeaea00] Invalid NAL unit size (0 > 661).
+[h264 @ 000001d6eeeaea00] Error splitting the input into NAL units.
+[aac @ 000001d6eef91900] channel element 0.0 is not allocated
+[h264 @ 000001d6ed1be8c0] Invalid NAL unit size (0 > 879).
+[h264 @ 000001d6ed1be8c0] missing picture in access unit with size 883
+[aist#0:1/aac @ 000001d6ed13db00] [dec:aac @ 000001d6eef0aac0] Error submitting packet to decoder: Invalid data found when processing input
+[h264 @ 000001d6eef42d80] Invalid NAL unit size (0 > 825).
+[h264 @ 000001d6eef42d80] Error splitting the input into NAL units.
+[aac @ 000001d6eef91900] channel element 0.0 is not allocated
+[aist#0:1/aac @ 000001d6ed13db00] [dec:aac @ 000001d6eef0aac0] Error submitting packet to decoder: Invalid data found when processing input
+[h264 @ 000001d6eef6b000] Invalid NAL unit size (0 > 1693).
+[h264 @ 000001d6eef6b000] Error splitting the input into NAL units.
+[h264 @ 000001d6eef91540] Invalid NAL unit size (0 > 879).
+[h264 @ 000001d6eef91540] Error splitting the input into NAL units.
+[h264 @ 000001d6eeea9600] mmco: unref short failure
+[vist#0:0/h264 @ 000001d6ed1bec80] [dec:h264 @ 000001d6ed16f980] Error submitting packet to decoder: Invalid data found when processing input
+    Last message repeated 3 times
+[Parsed_volumedetect_1 @ 000001d6ed0df6c0] n_samples: 876880
+[Parsed_volumedetect_1 @ 000001d6ed0df6c0] mean_volume: -21.1 dB
+[Parsed_volumedetect_1 @ 000001d6ed0df6c0] max_volume: -16.3 dB
+[Parsed_volumedetect_1 @ 000001d6ed0df6c0] histogram_16db: 83
+[Parsed_volumedetect_1 @ 000001d6ed0df6c0] histogram_17db: 167
+[Parsed_volumedetect_1 @ 000001d6ed0df6c0] histogram_18db: 254269
+[out#0/null @ 000001d6ed0f3440] video:247KiB audio:1713KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=  596 fps=0.0 q=-0.0 Lsize=N/A time=00:00:20.00 bitrate=N/A speed= 433x elapsed=0:00:00.04    

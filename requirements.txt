@@ -1,0 +1,5 @@
+# 运行时依赖（GUI 侧；分析引擎与 CLI 只用标准库）
+# 装法：.venv\Scripts\python -m pip install -r requirements.txt
+PySide6-Essentials==6.9.3
+PySide6-Addons==6.9.3      # 仅因 QtMultimedia 在此（Essentials 里没有）
+shiboken6==6.9.3           # 与上面两个同版本，显式钉住
